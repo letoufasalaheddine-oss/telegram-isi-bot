@@ -10,7 +10,23 @@ CHAT_ID = os.getenv("CHAT_ID")
 LAST_FILE = "last_post.txt"
 
 
-def get_latest_post():
+def read_last():
+
+    if not os.path.exists(LAST_FILE):
+        return ""
+
+    with open(LAST_FILE, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def save_last(link):
+
+    with open(LAST_FILE, "w", encoding="utf-8") as f:
+        f.write(link)
+
+
+def get_new_posts():
+
     headers = {
         "User-Agent": "Mozilla/5.0"
     }
@@ -24,6 +40,10 @@ def get_latest_post():
     r.raise_for_status()
 
     soup = BeautifulSoup(r.text, "html.parser")
+
+    last = read_last()
+
+    posts = []
 
     for a in soup.find_all("a", href=True):
 
@@ -40,81 +60,88 @@ def get_latest_post():
         if href.startswith("/"):
             href = "https://faculty.univ-eloued.dz" + href
 
-        print("Found:", title)
-        print("URL:", href)
 
-        return title, href
-
-    print("No announcement found")
-    return None, None
+        if href == last:
+            break
 
 
-def read_last():
-
-    if not os.path.exists(LAST_FILE):
-        return ""
-
-    with open(LAST_FILE, "r", encoding="utf-8") as f:
-        return f.read().strip()
+        posts.append((title, href))
 
 
-def save_last(link):
+    # حذف التكرار
+    unique_posts = []
+    seen = set()
 
-    with open(LAST_FILE, "w", encoding="utf-8") as f:
-        f.write(link)
+    for post in posts:
+        if post[1] not in seen:
+            unique_posts.append(post)
+            seen.add(post[1])
+
+
+    # ترتيب من الأقدم إلى الأحدث
+    unique_posts.reverse()
+
+    return unique_posts
 
 
 def send_telegram(title, link):
 
     text = f"""📢 إعلان جديد
 
-{title}
+📝 {title}
 
 🔗 الرابط:
 {link}
 """
 
+
     response = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         data={
             "chat_id": CHAT_ID,
-            "text": text
+            "text": text,
+            "disable_web_page_preview": False
         },
         timeout=30
     )
 
-    print("Telegram status:", response.status_code)
-    print(response.text)
+    response.raise_for_status()
 
 
 def main():
 
     print("Starting monitor...")
 
+
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN missing")
         return
+
 
     if not CHAT_ID:
         print("ERROR: CHAT_ID missing")
         return
 
-    title, link = get_latest_post()
 
-    if not link:
+    posts = get_new_posts()
+
+
+    if not posts:
+        print("No new announcements")
         return
 
-    last = read_last()
 
-    if link == last:
-        print("No new announcement")
-        return
+    for title, link in posts:
 
-    send_telegram(title, link)
+        print("Sending:", title)
 
-    save_last(link)
+        send_telegram(title, link)
 
-    print("Announcement sent")
+
+    save_last(posts[-1][1])
+
+
+    print(f"Sent {len(posts)} announcement(s)")
 
 
 if __name__ == "__main__":
